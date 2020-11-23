@@ -8,18 +8,21 @@ library(purrr)
 library(odbc)
 library(RODBC)
 library(dplyr)
+library(plotly)
 library(ggplot2)
 library(gtable)
 library(stringi)
 library(DBI)
+library(RcppRoll)
 library(naniar)
 library(stringr)
 library(lubridate)
+library(tictoc)
 
 # Establish ODBC Connection
 
 con <- dbConnect(odbc::odbc(), dsn = "CLPImpala")
-
+tic()
 # Bring in All Tdlinx-Specific Unique Attributes for Mapping
 
 VIP_SAM_Tdlinx <- dbSendQuery(con,"SELECT DISTINCT tdlinx_number, premise_type, bf_premise_type, bf_channel, channel, subchannel,
@@ -38,6 +41,7 @@ VIP_SAM_Tdlinx <- dbSendQuery(con,"SELECT DISTINCT tdlinx_number, premise_type, 
                                   AND nar_excl_flag IS NULL
                                   AND brand_lvl1 IN ('Active Brands')
                                   AND market_lvl3 IN ('United States')
+                                  AND fy >= 2018
                                   AND brand_name NOT IN ('Bacardi','Bols','Maximus')
                                   AND CONCAT(source, market_name) NOT IN ('SAMMichigan')
                                   AND (transaction_type IS NULL OR transaction_type IN ('R'))")
@@ -103,6 +107,7 @@ VIP_SAM_Brand <- dbSendQuery(con,"SELECT DISTINCT reporting_brand, brand_name, s
                                   AND nar_excl_flag IS NULL
                                   AND brand_lvl1 IN ('Active Brands')
                                   AND market_lvl3 IN ('United States')
+                                  AND fy >= 2018
                                   AND brand_name NOT IN ('Bacardi','Bols','Maximus')
                                   AND CONCAT(source, market_name) NOT IN ('SAMMichigan')
                                   AND (transaction_type IS NULL OR transaction_type IN ('R'))")
@@ -145,21 +150,33 @@ VIP_SAM_Brand <- VIP_SAM_Brand %>%
 
 # Conduct One Final Step to Ensure All Brand Attributes are Unique
 
-VIP_SAM_Brand <- VIP_SAM_Brand %>%
-  group_by(reporting_brand, sub_brand) %>%
+VIP_SAM_Reporting_Brand <- VIP_SAM_Brand %>%
+  select(-sub_brand, -sub_brand_name) %>%
+  
+  group_by(reporting_brand) %>%
   
   mutate(Row_Number = row_number()) %>%
   filter(Row_Number == 1) %>%
   
   ungroup() %>%
   
-  arrange(reporting_brand, sub_brand) %>%
-  select(-Row_Number) %>%
+  arrange(reporting_brand) %>%
+  select(-Row_Number)
+
+VIP_SAM_Sub_Brand <- VIP_SAM_Brand %>%
+  select(sub_brand, sub_brand_name) %>%
   
-  mutate(Brand_ID = paste(reporting_brand, sub_brand, sep = "-")) %>%
+  group_by(sub_brand) %>%
   
-  select(Brand_ID, reporting_brand:brand_us_lvl6) %>%
-  select(-reporting_brand, -sub_brand)
+  mutate(Row_Number = row_number()) %>%
+  filter(Row_Number == 1) %>%
+  
+  ungroup() %>%
+  
+  arrange(sub_brand) %>%
+  select(-Row_Number)
+
+rm(VIP_SAM_Brand)
 
 # Establish ODBC Connection
 
@@ -173,6 +190,7 @@ VIP_SAM_Bottle_Size <- dbSendQuery(con,"SELECT DISTINCT bottle_size, bottle_size
                                         AND nar_excl_flag IS NULL
                                         AND brand_lvl1 IN ('Active Brands')
                                         AND market_lvl3 IN ('United States')
+                                        AND fy >= 2018
                                         AND brand_name NOT IN ('Bacardi','Bols','Maximus')
                                         AND CONCAT(source, market_name) NOT IN ('SAMMichigan')
                                         AND (transaction_type IS NULL OR transaction_type IN ('R'))")
@@ -218,6 +236,7 @@ VIP_SAM_Ship_To <- dbSendQuery(con,"SELECT DISTINCT ship_to, bf_customer_name, d
                                     AND nar_excl_flag IS NULL
                                     AND brand_lvl1 IN ('Active Brands')
                                     AND market_lvl3 IN ('United States')
+                                    AND fy >= 2018
                                     AND brand_name NOT IN ('Bacardi','Bols','Maximus')
                                     AND CONCAT(source, market_name) NOT IN ('SAMMichigan')
                                     AND (transaction_type IS NULL OR transaction_type IN ('R'))")
@@ -278,7 +297,7 @@ VIP_SAM <- dbSendQuery(con,"SELECT tdlinx_number, reporting_brand, sub_brand,
                             AND nar_excl_flag IS NULL
                             AND brand_lvl1 IN ('Active Brands')
                             AND market_lvl3 IN ('United States')
-                            AND fy >= ((SELECT MAX(fy) FROM dp_nar.vwr_vip_sam)-3)
+                            AND fy >= 2018
                             AND brand_name NOT IN ('Bacardi','Bols','Maximus')
                             AND CONCAT(source, market_name) NOT IN ('SAMMichigan')
                             AND (transaction_type IS NULL OR transaction_type IN ('R'))
@@ -569,41 +588,41 @@ VIP_SAM_Final <- VIP_SAM_Final %>%
 # Develop Sales Indicators for This Year & Last Year
 
 VIP_SAM_Final <- VIP_SAM_Final %>%
-  mutate(CYTD_Sales = case_when(CYTD_cases_9l > 0 ~ 1,
-                                CYTD_cases_9l <= 0 ~ 0)) %>%
+  mutate(CYTD_Sales = case_when(CYTD_cases_9l > 0.032 ~ 1,
+                                CYTD_cases_9l <= 0.032 ~ 0)) %>%
   
-  mutate(CYTD_Sales_LY = case_when(CYTD_cases_9l_LY > 0 ~ 1,
-                                   CYTD_cases_9l_LY <= 0 ~ 0)) %>%
+  mutate(CYTD_Sales_LY = case_when(CYTD_cases_9l_LY > 0.032 ~ 1,
+                                   CYTD_cases_9l_LY <= 0.032 ~ 0)) %>%
   
-  mutate(FYTD_Sales = case_when(FYTD_cases_9l > 0 ~ 1,
-                                FYTD_cases_9l <= 0 ~ 0)) %>%
+  mutate(FYTD_Sales = case_when(FYTD_cases_9l > 0.032 ~ 1,
+                                FYTD_cases_9l <= 0.032 ~ 0)) %>%
   
-  mutate(FYTD_Sales_LY = case_when(FYTD_cases_9l_LY > 0 ~ 1,
-                                   FYTD_cases_9l_LY <= 0 ~ 0)) %>%
+  mutate(FYTD_Sales_LY = case_when(FYTD_cases_9l_LY > 0.032 ~ 1,
+                                   FYTD_cases_9l_LY <= 0.032 ~ 0)) %>%
   
-  mutate(V1_Month_Sales = case_when(V1_Month_cases_9l > 0 ~ 1,
-                                    V1_Month_cases_9l <= 0 ~ 0)) %>%
+  mutate(V1_Month_Sales = case_when(V1_Month_cases_9l > 0.032 ~ 1,
+                                    V1_Month_cases_9l <= 0.032 ~ 0)) %>%
   
-  mutate(V1_Month_Sales_LY = case_when(V1_Month_cases_9l_LY > 0 ~ 1,
-                                       V1_Month_cases_9l_LY <= 0 ~ 0)) %>%
+  mutate(V1_Month_Sales_LY = case_when(V1_Month_cases_9l_LY > 0.032 ~ 1,
+                                       V1_Month_cases_9l_LY <= 0.032 ~ 0)) %>%
   
-  mutate(V3_Month_Sales = case_when(V3_Month_cases_9l > 0 ~ 1,
-                                    V3_Month_cases_9l <= 0 ~ 0)) %>%
+  mutate(V3_Month_Sales = case_when(V3_Month_cases_9l > 0.032 ~ 1,
+                                    V3_Month_cases_9l <= 0.032 ~ 0)) %>%
   
-  mutate(V3_Month_Sales_LY = case_when(V3_Month_cases_9l_LY > 0 ~ 1,
-                                       V3_Month_cases_9l_LY <= 0 ~ 0)) %>%
+  mutate(V3_Month_Sales_LY = case_when(V3_Month_cases_9l_LY > 0.032 ~ 1,
+                                       V3_Month_cases_9l_LY <= 0.032 ~ 0)) %>%
   
-  mutate(V6_Month_Sales = case_when(V6_Month_cases_9l > 0 ~ 1,
-                                    V6_Month_cases_9l <= 0 ~ 0)) %>%
+  mutate(V6_Month_Sales = case_when(V6_Month_cases_9l > 0.032 ~ 1,
+                                    V6_Month_cases_9l <= 0.032 ~ 0)) %>%
   
-  mutate(V6_Month_Sales_LY = case_when(V6_Month_cases_9l_LY > 0 ~ 1,
-                                       V6_Month_cases_9l_LY <= 0 ~ 0)) %>%
+  mutate(V6_Month_Sales_LY = case_when(V6_Month_cases_9l_LY > 0.032 ~ 1,
+                                       V6_Month_cases_9l_LY <= 0.032 ~ 0)) %>%
   
-  mutate(V12_Month_Sales = case_when(V12_Month_cases_9l > 0 ~ 1,
-                                     V12_Month_cases_9l <= 0 ~ 0)) %>%
+  mutate(V12_Month_Sales = case_when(V12_Month_cases_9l > 0.032 ~ 1,
+                                     V12_Month_cases_9l <= 0.032 ~ 0)) %>%
   
-  mutate(V12_Month_Sales_LY = case_when(V12_Month_cases_9l_LY > 0 ~ 1,
-                                        V12_Month_cases_9l_LY <= 0 ~ 0))
+  mutate(V12_Month_Sales_LY = case_when(V12_Month_cases_9l_LY > 0.032 ~ 1,
+                                        V12_Month_cases_9l_LY <= 0.032 ~ 0))
 
 # Reorder Data
 
@@ -614,10 +633,10 @@ VIP_SAM_Final <- VIP_SAM_Final %>%
 # Calculate Brand-Minor Level Repurchase Counts
 
 VIP_SAM_Repurchase <- VIP_SAM_Final %>%
-  select(tdlinx_number, reporting_brand, sub_brand, t_date, 
+  select(tdlinx_number, sub_brand, t_date, 
          fy, cy, V1_Month_Sales) %>%
   
-  group_by(tdlinx_number, reporting_brand, sub_brand, t_date) %>%
+  group_by(tdlinx_number, sub_brand, t_date) %>%
   mutate(V1_Month_Purchase = max(V1_Month_Sales)) %>%
   
   ungroup() %>%
@@ -626,21 +645,21 @@ VIP_SAM_Repurchase <- VIP_SAM_Final %>%
   
   distinct() %>%
   
-  arrange(tdlinx_number, reporting_brand, sub_brand, t_date) %>% 
+  arrange(tdlinx_number, sub_brand, t_date) %>% 
   
-  group_by(tdlinx_number, reporting_brand, sub_brand, fy) %>% 
+  group_by(tdlinx_number, sub_brand, fy) %>% 
   
   mutate(FYTD_Repurchase = (cumsum(V1_Month_Purchase)-1)) %>% 
   
   ungroup() %>%
   
-  group_by(tdlinx_number, reporting_brand, sub_brand, cy) %>% 
+  group_by(tdlinx_number, sub_brand, cy) %>% 
   
   mutate(CYTD_Repurchase = (cumsum(V1_Month_Purchase) - 1)) %>% 
   
   ungroup() %>%
   
-  group_by(tdlinx_number, reporting_brand, sub_brand) %>%
+  group_by(tdlinx_number, sub_brand) %>%
   
   mutate(V1_Month_Repurchase = (V1_Month_Purchase - 1)) %>% 
   mutate(V3_Month_Repurchase = (roll_sum(x = V1_Month_Purchase, n = 3, align = "right", fill = 0, na.rm = FALSE) -1)) %>%
@@ -657,16 +676,61 @@ VIP_SAM_Repurchase <- VIP_SAM_Final %>%
   
   ungroup() %>%
   
+  mutate_if(is.character, replace_na, "N/A") %>%
+  mutate_if(is.numeric, replace_na, 0) %>%
+  
+  mutate(FYTD_Repurchase = if_else(FYTD_Repurchase < 0, 0, FYTD_Repurchase)) %>%
+  mutate(FYTD_Repurchase_LY = if_else(FYTD_Repurchase_LY < 0, 0, FYTD_Repurchase_LY)) %>%
+  
+  mutate(CYTD_Repurchase = if_else(CYTD_Repurchase < 0, 0, CYTD_Repurchase)) %>%
+  mutate(CYTD_Repurchase_LY = if_else(CYTD_Repurchase_LY < 0, 0, CYTD_Repurchase_LY)) %>%
+  
+  mutate(V1_Month_Repurchase = if_else(V1_Month_Repurchase < 0, 0, V1_Month_Repurchase)) %>%
+  mutate(V1_Month_Repurchase_LY = if_else(V1_Month_Repurchase_LY < 0, 0, V1_Month_Repurchase_LY)) %>% 
+  
+  mutate(V3_Month_Repurchase = if_else(V3_Month_Repurchase < 0, 0, V3_Month_Repurchase)) %>%
+  mutate(V3_Month_Repurchase_LY = if_else(V3_Month_Repurchase_LY < 0, 0, V3_Month_Repurchase_LY)) %>%
+  
+  mutate(V6_Month_Repurchase = if_else(V6_Month_Repurchase < 0, 0, V6_Month_Repurchase)) %>%
+  mutate(V6_Month_Repurchase_LY = if_else(V6_Month_Repurchase_LY < 0, 0, V6_Month_Repurchase_LY)) %>%
+  
+  mutate(V12_Month_Repurchase = if_else(V12_Month_Repurchase < 0, 0, V12_Month_Repurchase)) %>%
+  mutate(V12_Month_Repurchase_LY = if_else(V12_Month_Repurchase_LY < 0, 0, V12_Month_Repurchase_LY)) %>%
+  
   select(-cy, -fy, -V1_Month_Purchase)
+
 
 # Merge Repurchase Data Into Final Data Set
 
 VIP_SAM_Final <- full_join(VIP_SAM_Final, VIP_SAM_Repurchase)
 
-# Add Brand ID Field to Final Data Set for Successful Mapping to Brand Attributes File
+# Set All Duplicate Repurchase Values at the Brand Minor Level to 0 - Allows for Aggregation in Tableau
 
 VIP_SAM_Final <- VIP_SAM_Final %>%
-  mutate(Brand_ID = paste(reporting_brand, sub_brand, sep = "-"))
+  group_by(tdlinx_number, sub_brand, t_date) %>%
+  mutate(Row_ID = row_number()) %>%
+  
+  ungroup() %>%
+  
+  mutate(FYTD_Repurchase = if_else(Row_ID > 1, 0, FYTD_Repurchase)) %>%
+  mutate(FYTD_Repurchase_LY = if_else(Row_ID > 1, 0, FYTD_Repurchase_LY)) %>%
+  
+  mutate(CYTD_Repurchase = if_else(Row_ID > 1, 0, CYTD_Repurchase)) %>%
+  mutate(CYTD_Repurchase_LY = if_else(Row_ID > 1, 0, CYTD_Repurchase_LY)) %>%
+  
+  mutate(V1_Month_Repurchase = if_else(Row_ID > 1, 0, V1_Month_Repurchase)) %>%
+  mutate(V1_Month_Repurchase_LY = if_else(Row_ID > 1, 0, V1_Month_Repurchase_LY)) %>% 
+  
+  mutate(V3_Month_Repurchase = if_else(Row_ID > 1, 0, V3_Month_Repurchase)) %>%
+  mutate(V3_Month_Repurchase_LY = if_else(Row_ID > 1, 0, V3_Month_Repurchase_LY)) %>%
+  
+  mutate(V6_Month_Repurchase = if_else(Row_ID > 1, 0, V6_Month_Repurchase)) %>%
+  mutate(V6_Month_Repurchase_LY = if_else(Row_ID > 1, 0, V6_Month_Repurchase_LY)) %>%
+  
+  mutate(V12_Month_Repurchase = if_else(Row_ID > 1, 0, V12_Month_Repurchase)) %>%
+  mutate(V12_Month_Repurchase_LY = if_else(Row_ID > 1, 0, V12_Month_Repurchase_LY)) %>%
+  
+  select(-Row_ID)
 
 # Merge Tdlinx Data In
 
@@ -680,102 +744,13 @@ VIP_SAM_Final <- left_join(VIP_SAM_Final, VIP_SAM_Ship_To, "ship_to")
 
 VIP_SAM_Final <- left_join(VIP_SAM_Final, VIP_SAM_Bottle_Size, "bottle_size")
 
-# Merge Brand Data In
+# Merge Reporting Brand Data In
 
-VIP_SAM_Final <- left_join(VIP_SAM_Final, VIP_SAM_Brand, "Brand_ID")
+VIP_SAM_Final <- left_join(VIP_SAM_Final, VIP_SAM_Reporting_Brand, "reporting_brand")
 
-# Drop Brand ID Variable
+# Merge Sub Brand Data In
 
-VIP_SAM_Final <- VIP_SAM_Final %>%
-  select(-Brand_ID)
-
-# Limit Final End Date to the Most Recent Closed Month
-
-VIP_SAM_Final <- VIP_SAM_Final %>%
-  mutate(Timestamp = lubridate:: today()) %>%
-  mutate(Month = month(Timestamp)) %>%
-  mutate(Year = year(Timestamp)) %>%
-  
-  mutate(Date = paste(Month,"1",Year,sep = "-")) %>%
-  mutate(Date = as.Date(Date,"%m-%d-%Y")) %>%
-  
-  select(-Timestamp, -Month, -Year) %>%
-  
-  mutate(Month = month(Date) - 1) %>%
-  mutate(Year = year(Date)) %>%
-  
-  mutate(Date = paste(Month,"1",Year,sep = "-")) %>%
-  mutate(Date = as.Date(Date,"%m-%d-%Y")) %>%
-  
-  select(-Year, -Month) %>%
-  
-  filter(t_date <= Date) %>%
-  select(-Date)
-
-VIP_SAM_Time_Flag <- VIP_SAM_Final %>%
-  select(t_date, fy, cy) %>%
-  
-  mutate(Max_FY = max(fy)) %>%
-  mutate(Max_CY = max(cy)) %>%
-  
-  distinct() %>%
-  arrange(t_date) %>%
-  
-  mutate(Row_ID = row_number()) %>%
-  
-  mutate(V1_Month_Actuals_Flag = if_else(Row_ID >= 1, 1, 0)) %>%
-  mutate(V3_Month_Actuals_Flag = if_else(Row_ID >= 3, 1, 0)) %>%
-  mutate(V6_Month_Actuals_Flag = if_else(Row_ID >= 6, 1, 0)) %>%
-  mutate(V12_Month_Actuals_Flag = if_else(Row_ID >= 12, 1, 0)) %>%
-  
-  group_by(cy) %>%
-  
-  mutate(Row_ID_CY = row_number()) %>%
-  mutate(Max_Row_ID_CY = max(Row_ID_CY)) %>%
-  
-  ungroup() %>%
-  
-  mutate(CYTD_Actuals_Flag = if_else(Max_Row_ID_CY == 12 | cy == Max_CY , 1, 0)) %>%
-  
-  group_by(fy) %>%
-  
-  mutate(Row_ID_FY = row_number()) %>%
-  mutate(Max_Row_ID_FY = max(Row_ID_FY)) %>%
-  
-  ungroup() %>%
-  
-  mutate(FYTD_Actuals_Flag = if_else(Max_Row_ID_FY == 12 | fy == Max_FY , 1, 0)) %>%
-  
-  mutate(V1_Month_YoY_Flag = if_else(Row_ID >= 13, 1, 0)) %>%
-  mutate(V3_Month_YoY_Flag = if_else(Row_ID >= 15, 1, 0)) %>%
-  mutate(V6_Month_YoY_Flag = if_else(Row_ID >= 18, 1, 0)) %>%
-  mutate(V12_Month_YoY_Flag = if_else(Row_ID >= 24, 1, 0)) %>%
-  
-  mutate(Max_Row_ID_CY_LY = replace_na(lag(Max_Row_ID_CY, 12),0)) %>%
-  mutate(Max_Row_ID_FY_LY = replace_na(lag(Max_Row_ID_FY, 12),0)) %>%
-  
-  mutate(CYTD_YoY_Flag = if_else(Max_Row_ID_CY_LY == 12, 1, 0)) %>%
-  mutate(FYTD_YoY_Flag = if_else(Max_Row_ID_FY_LY == 12, 1, 0)) %>%
-  
-  select(-Row_ID, -Row_ID_CY, -Max_Row_ID_CY, -Row_ID_FY, 
-         -Max_Row_ID_FY, -Max_Row_ID_CY_LY, -Max_Row_ID_FY_LY,
-         -fy, -cy, -Max_FY, -Max_CY)
-
-# Merge Time Period Flag Data Into Final Data Set
-
-VIP_SAM_Final <- full_join(VIP_SAM_Final, VIP_SAM_Time_Flag)
-
-# Develop Store Name & Tdlinx Field & SKU Field
-
-VIP_SAM_Final <- VIP_SAM_Final %>%
-  mutate(SKU = paste(sub_brand_name, bottle_size_name, sep = " ")) %>%
-  mutate(Store = paste(store_name, tdlinx_number, sep = " - "))
-
-# Reorder Final Data Set
-
-VIP_SAM_Final <- VIP_SAM_Final %>%
-  select(tdlinx_number:fy, premise_type:sub_brand_name,
-         Store, SKU, Complete_Data_Flag:FYTD_YoY_Flag)
+VIP_SAM_Final <- left_join(VIP_SAM_Final, VIP_SAM_Sub_Brand, "sub_brand")
 
 # Remove All Unnecessary Data
 
@@ -783,15 +758,27 @@ rm(VIP_SAM_Tdlinx)
 rm(VIP_SAM_Ship_To)
 rm(VIP_SAM_Bottle_Size)
 
-rm(VIP_SAM_Brand)
+rm(VIP_SAM_Reporting_Brand)
+rm(VIP_SAM_Sub_Brand)
 rm(VIP_SAM_Repurchase)
-rm(VIP_SAM_Time_Flag)
+
+# Reorder Final Data Set
+
+VIP_SAM_Final <- VIP_SAM_Final %>%
+  select(tdlinx_number:fy, premise_type:sub_brand_name,
+         Complete_Data_Flag:V12_Month_Repurchase_LY)
 
 # Set Working Directory for File Saving
 
-setwd("C:/Users/bi6ejdr/Desktop/Robbins Work")
+#setwd("C:/Users/bi6ejdr/Desktop/Robbins Work")
 
 # Write Out CSV and Drop Trigger
 
-write_csv(VIP_SAM_Final,"VIP_SAM_Test.csv")
+write_csv(VIP_SAM_Final,"VIP_SAM_KY_Test.csv")
+
+toc()
+
+
+
+
 
