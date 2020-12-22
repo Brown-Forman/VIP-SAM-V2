@@ -183,6 +183,36 @@ VIP_SAM_Bottle_Size <- dbSendQuery(con,"SELECT DISTINCT bottle_size, bottle_size
 
 VIP_SAM_Bottle_Size <- dbFetch(VIP_SAM_Bottle_Size)
 
+# Further Enhance Bottle Size Name Mappings
+
+VIP_SAM_Bottle_Size <- VIP_SAM_Bottle_Size %>%
+  mutate(bottle_size_name = case_when(bottle_size =="0.050" ~ "50ml",
+                                      bottle_size =="0.100" ~ "100ml",
+                                      bottle_size =="0.187" ~ "187ml",
+                                      bottle_size =="0.200" ~ "200ml",
+                                      bottle_size =="0.207" ~ "207ml",
+                                      bottle_size =="0.296" ~ "296ml",
+                                      bottle_size =="0.355" ~ "355ml",
+                                      bottle_size =="0.375" ~ "375ml",
+                                      bottle_size =="0.425" ~ "425ml",
+                                      bottle_size =="0.473" ~ "473ml",
+                                      bottle_size =="0.478" ~ "478ml",
+                                      bottle_size =="0.500" ~ "500ml",
+                                      bottle_size =="0.700" ~ "700ml",
+                                      bottle_size =="0.710" ~ "710ml",
+                                      bottle_size =="0.749" ~ "749ml",
+                                      bottle_size =="0.750" ~ "750ml",
+                                      bottle_size =="0.800" ~ "800ml",
+                                      bottle_size =="1.000" ~ "1L",
+                                      bottle_size =="1.125" ~ "1.125L",
+                                      bottle_size =="1.500" ~ "1.5L",
+                                      bottle_size =="1.750" ~ "1.75L",
+                                      bottle_size =="1.950" ~ "1.95L",
+                                      bottle_size =="19.500" ~ "19.5L",
+                                      bottle_size =="2.125" ~ "2.125L",
+                                      bottle_size =="3.000" ~ "3L",
+                                      bottle_size =="5.917" ~ "5.917L"))
+
 # Replace all NA or Blank Character Fields with "N/A" & all NA Numeric Fields with 0
 
 VIP_SAM_Bottle_Size <- VIP_SAM_Bottle_Size %>%
@@ -610,8 +640,60 @@ VIP_SAM_Final <- VIP_SAM_Final %>%
 # Reorder Data
 
 VIP_SAM_Final <- VIP_SAM_Final %>%
-  select(tdlinx_number:Complete_Data_Flag, CYTD_cases_9l:V12_Month_Sales_LY)
+  mutate(Same_Store_New_Store_Flag = V12_Month_Sales_LY) %>%
+  select(tdlinx_number:Complete_Data_Flag, CYTD_cases_9l:Same_Store_New_Store_Flag)
 
+VIP_SAM_Final <- VIP_SAM_Final %>%
+  group_by(tdlinx_number, reporting_brand, sub_brand,
+           bottle_size, t_date) %>%
+  
+  mutate(Row_ID = row_number()) %>%
+  mutate(Max_Row_ID = max(Row_ID)) %>%
+  
+  mutate(CYTD_Sales = max(CYTD_Sales)) %>%
+  mutate(CYTD_Sales_LY = max(CYTD_Sales_LY)) %>%
+  
+  mutate(FYTD_Sales = max(FYTD_Sales)) %>%
+  mutate(FYTD_Sales_LY = max(FYTD_Sales_LY)) %>%
+  
+  mutate(V1_Month_Sales = max(V1_Month_Sales)) %>%
+  mutate(V1_Month_Sales_LY = max(V1_Month_Sales_LY)) %>%
+  
+  mutate(V3_Month_Sales = max(V3_Month_Sales)) %>%
+  mutate(V3_Month_Sales_LY = max(V3_Month_Sales_LY)) %>%
+  
+  mutate(V6_Month_Sales = max(V6_Month_Sales)) %>%
+  mutate(V6_Month_Sales_LY = max(V6_Month_Sales_LY)) %>%
+  
+  mutate(V12_Month_Sales = max(V12_Month_Sales)) %>%
+  mutate(V12_Month_Sales_LY = max(V12_Month_Sales_LY)) %>%
+  
+  ungroup() %>%
+  
+  mutate(CYTD_Sales = if_else(Row_ID > 1, 0, CYTD_Sales)) %>%
+  mutate(CYTD_Sales_LY = if_else(Row_ID > 1, 0, CYTD_Sales_LY)) %>%
+  
+  mutate(FYTD_Sales = if_else(Row_ID > 1, 0, FYTD_Sales)) %>%
+  mutate(FYTD_Sales_LY = if_else(Row_ID > 1, 0, FYTD_Sales_LY)) %>%
+  
+  mutate(V1_Month_Sales = if_else(Row_ID > 1, 0, V1_Month_Sales)) %>%
+  mutate(V1_Month_Sales_LY = if_else(Row_ID > 1, 0, V1_Month_Sales_LY)) %>%
+  
+  mutate(V3_Month_Sales = if_else(Row_ID > 1, 0, V3_Month_Sales)) %>%
+  mutate(V3_Month_Sales_LY = if_else(Row_ID > 1, 0, V3_Month_Sales_LY)) %>%
+  
+  mutate(V6_Month_Sales = if_else(Row_ID > 1, 0, V6_Month_Sales)) %>%
+  mutate(V6_Month_Sales_LY = if_else(Row_ID > 1, 0, V6_Month_Sales_LY)) %>%
+  
+  mutate(V12_Month_Sales = if_else(Row_ID > 1, 0, V12_Month_Sales)) %>%
+  mutate(V12_Month_Sales_LY = if_else(Row_ID > 1, 0, V12_Month_Sales_LY)) %>%
+  
+  filter(Max_Row_ID > 1) %>%
+  
+  arrange(tdlinx_number, reporting_brand, sub_brand,
+          bottle_size, t_date, Row_ID) %>%
+  
+  select(-Row_ID, -Max_Row_ID)
 
 # Calculate Brand-Minor Level Repurchase Counts
 
@@ -789,8 +871,16 @@ rm(VIP_SAM_Brand)
 rm(VIP_SAM_Repurchase)
 rm(VIP_SAM_Time_Flag)
 
-# Set Working Directory for File Saving
+# Arrange Final Data Set & Reorder One Final Time
 
+VIP_SAM_Final <- VIP_SAM_Final %>%
+  arrange(tdlinx_number, ship_to, reporting_brand, sub_brand,
+          bottle_size, t_date) %>%
+  
+  select(tdlinx_number:V12_Month_Sales_LY, FYTD_Repurchase:FYTD_YoY_Flag,
+         Same_Store_New_Store_Flag)
+
+# Set Working Directory for File Saving
 
 setwd("/data1/dataload/data_science/VIPSAMII")
 
@@ -799,4 +889,3 @@ setwd("/data1/dataload/data_science/VIPSAMII")
 write_csv(VIP_SAM_Final,"VIP_SAM_II.csv")
 trigger <- 1
 write(trigger,"../../job_triggers/VIPSAMII_trigger.trg")
-
